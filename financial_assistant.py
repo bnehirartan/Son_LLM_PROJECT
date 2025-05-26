@@ -15,16 +15,17 @@ from chromadb import Client, PersistentClient
 from chromadb.utils import embedding_functions
 from sentence_transformers import SentenceTransformer
 import hashlib
+from dotenv import load_dotenv
+load_dotenv()
+gemini_api_key = os.getenv("gemini_api_key")
+ser_api_key = os.getenv("ser_api_key")
+genai.configure(api_key=gemini_api_key)
 
-GOOGLE_API_KEY = "AIzaSyBt0JdZIjSp7lWNrfgV1ChLzI7j_dMxEMo"
-SERPAPI_KEY    = "9ab3b71d68d6d02d80ac0e0fd122313c4f1484434a0ad46c5b232acfedec1d5c"
-genai.configure(api_key=GOOGLE_API_KEY)
-
-# ChromaDB için klasör yolu - lütfen kendi yolunuzu güncelleyin
-CHROMADB_PATH = "C:\\Users\\user\\Desktop\\deneme2_llm\\ChromaDBData"
+# ChromaDB folder path - please update with your own path
+CHROMADB_PATH = os.getenv("CHROMADB_PATH", "chroma_db")
 
 
-# Güvenlik ayarları
+# Security settings
 safety_config = {
     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
@@ -97,9 +98,9 @@ inflation definition, inflation effect on savings, student savings inflation imp
 """,
                                 {
         "temperature": 0.2,
-        "top_p": 0.85,
+        "top_p": 0.95,
         "top_k": 30,
-        "max_output_tokens": 150
+        "max_output_tokens": 80
     })
 
 relevance_agent = Agent(
@@ -112,14 +113,16 @@ either a user question or a snippet of PDF text. Do the following:
    finance, economics, investment, monetary policy, interest rates, market dynamics, or financial literacy.
 2. If it is relevant, reply exactly:
      relevant
-3. If it is not relevant, reply with one of these block messages—
-   matching the language of the input—without any extra text:
-   • English: "❗ Sorry, I can only answer finance-related questions."
-   • Turkish: "❗ Üzgünüm, yalnızca finans konularıyla ilgili soruları yanıtlayabiliyorum."
+3. If it is not relevant, choose your reply based on whether the input
+   looks like a document snippet (e.g., contains “PDF” or “excerpt”):
+   • If it’s a **PDF/text snippet**:
+     - English: "❗ Sorry, the file you uploaded seems unrelated to financial matters."
+     - Turkish: "❗ Üzgünüm, yüklenen dosya finansal konularla ilgili değil."
+   • Otherwise (a user question):
+     - English: "❗ Sorry, I can only answer finance-related questions."
+     - Turkish: "❗ Üzgünüm, yalnızca finans konularıyla ilgili soruları yanıtlayabiliyorum."
 
 Return exactly one line: either "relevant" or the correct block message.
-### Few-Shot Examples
-### Few-Shot Examples
 
 Input: "Enflasyon nedir ve nasıl hesaplanır?"  
 Output: relevant
@@ -147,13 +150,13 @@ Output: relevant
 Input:
 "PDF excerpt:
 – Rainfall in April was 200mm in Istanbul."  
-Output: ❗ Üzgünüm, yalnızca finans konularıyla ilgili soruları yanıtlayabiliyorum.
+Output: Sorry, the file you uploaded seems unrelated to financial matters.
 """.strip(),
     generation_config={
         "temperature": 0.0,
         "top_p": 1.0,
         "top_k": 1,
-        "max_output_tokens": 30
+        "max_output_tokens": 40
     }
 )
 danger_agent = Agent(
@@ -204,7 +207,6 @@ You are a helpful financial information assistant. Your task is to answer user q
 The following text excerpts come from uploaded financial documents (e.g., reports, statements, or articles).
 
 📌 Answer Style:
-- Always greet the user briefly (e.g., "Sure!", "Elbette!", "Tabii ki!").  
 - Keep language clear and jargon-free; explain any technical terms when they appear.  
 - Match the user's language: English questions → English answers; Turkish questions → Turkish answers.  
 - If the question is simple, one or two sentences may suffice. If the question is complex or multi-part, provide a longer, structured answer (use paragraphs or bullet points as needed).  
@@ -223,7 +225,7 @@ Example 1 (English, short):
 [USER QUESTION]
 What was the net profit margin in Q4 2023?
 [EXPECTED ANSWER]
-Sure! The net profit margin in Q4 2023 was 12.5%, up from 10% in Q3.
+The net profit margin in Q4 2023 was 12.5%, up from 10% in Q3.
 
 Example 2 (Turkish, detailed):
 [DOCUMENT EXCERPTS]
@@ -232,8 +234,7 @@ Example 2 (Turkish, detailed):
 – Likidite oranı: 1,5."
 [USER QUESTION]
 Şirketin 2022 yıl sonu likidite oranı nedir ve bu oran ne anlama geliyor?
-[EXPECTED ANSWER]
-Elbette!  
+[EXPECTED ANSWER] 
 - Şirketin 2022 yıl sonunda likidite oranı 1,5'tir.  
 - Likidite oranı, şirketin kısa vadeli yükümlülüklerini karşılama gücünü gösterir; 1,5 değeri, her 1 TL borca karşı 1,5 TL dönebilir varlığa sahip olduğunu gösterir.  
 - Bu seviye, genel olarak finansal sağlığın iyi olduğuna işaret eder.
@@ -247,7 +248,7 @@ Faaliyet giderleri geçen yılın aynı dönemine göre %5 azaldı."
 Özetle
 [EXPECTED ANSWER]
 [EXPECTED ANSWER]
-Tabii ki! 2024 yılının ilk yarısında şirketimizin cirosu yüzde 15 artış göstererek 50 milyon TL'ye yükselmiştir. Bu büyüme, satış hacmindeki güçlü artıştan ve yeni pazarlara açılma stratejisinin başarısından kaynaklanmıştır. Brüt kar marjı aynı dönemde yüzde 22'den yüzde 25'e çıkmış; bu da maliyet kontrolü ve verimlilik iyileştirmelerinin etkisini yansıtır. Öte yandan, faaliyet giderlerimiz geçen yılın ilk yarısına göre yüzde 5 azalarak işletme verimliliğini daha da güçlendirmiştir. Bu gelişmeler bir arada değerlendirildiğinde, şirketin hem gelir artışı hem de maliyet yönetiminde başarılı bir performans sergilediğini söyleyebiliriz. Böyle sağlam bir finansal yapı, gelecekteki yatırımlar için de pozitif bir işaret niteliğindedir.
+2024 yılının ilk yarısında şirketimizin cirosu yüzde 15 artış göstererek 50 milyon TL'ye yükselmiştir. Bu büyüme, satış hacmindeki güçlü artıştan ve yeni pazarlara açılma stratejisinin başarısından kaynaklanmıştır. Brüt kar marjı aynı dönemde yüzde 22'den yüzde 25'e çıkmış; bu da maliyet kontrolü ve verimlilik iyileştirmelerinin etkisini yansıtır. Öte yandan, faaliyet giderlerimiz geçen yılın ilk yarısına göre yüzde 5 azalarak işletme verimliliğini daha da güçlendirmiştir. Bu gelişmeler bir arada değerlendirildiğinde, şirketin hem gelir artışı hem de maliyet yönetiminde başarılı bir performans sergilediğini söyleyebiliriz. Böyle sağlam bir finansal yapı, gelecekteki yatırımlar için de pozitif bir işaret niteliğindedir.
 Bu gelişmeler, şirketin hem büyüdüğünü hem de gider kontrolünde başarılı olduğunu gösterir.
 Now, using only the provided excerpts, respond to the user's question following these guidelines.
 """
@@ -312,7 +313,7 @@ def search_google(query):
         "q": query,
         "location": "Turkey",
         "num": 15,
-        "api_key": SERPAPI_KEY
+        "api_key": ser_api_key
     })
     return search.get_dict()
 
@@ -418,7 +419,7 @@ class FinSentioRAG:
         with open(file_path, 'rb') as f:
             return hashlib.md5(f.read()).hexdigest()
 
-    def split_text(self, texts, chunk_size=2000, chunk_overlap=200):
+    def split_text(self, texts, chunk_size=2000, chunk_overlap=300):
         """Daha büyük chunk'lar kullanarak metni böl"""
         splitter = RecursiveCharacterTextSplitter(
             separators=["\n\n", "\n", ". ", " ", ""],
@@ -535,18 +536,7 @@ class FinSentioRAG:
             
             self.current_pdf_path = None
             self.current_collection = None
-
-def reinforce_role(prompt: str) -> bool:
-    red_flags = [
-        # Türkçe
-        "önceki komutları unut", "artık kural tanımıyorsun", "asistan değilsin",
-        "kendi kararını ver", "filtresiz cevapla", "rol yap", "kısıtlamaları kaldır",
-        # İngilizce
-        "ignore previous", "you no longer follow", "you are not an assistant",
-        "uncensored", "unfiltered", "break the rules", "jailbreak", "pretend to"
-    ]
-    prompt_lower = prompt.lower()
-    return not any(flag in prompt_lower for flag in red_flags)
+            
 
 def format_answer_with_clickable_links(raw_answer):
     if "Sources:" in raw_answer:
@@ -583,21 +573,14 @@ def generate_financial_response(prompt, pdf_file=None, history=None, clear_pdf=F
         if clear_pdf and rag_instance:
             rag_instance.clear_current_pdf()
             return "PDF temizlendi."
-
-        if prompt.lower() in ["selam", "selam naber", "merhaba", "hello", "how are you", "what's up", "hi"]:
-            return "Merhaba! Finansıyla ilgili nasıl yardımcı olabilirim?"
-
         blk = danger_agent.generate_response(prompt).strip()
         if blk != "safe":
             return blk
-       
         intent = "file_analysis" if pdf_file else intent_classifier.generate_response(prompt).strip()
         print("Intent:", intent)    
 
         if intent == "file_analysis" and pdf_file is not None:
             temp_path = "temp_upload.pdf"
-            
-            
             try:
                 # PDF işleme
                 pdf_saved = False
@@ -633,7 +616,7 @@ def generate_financial_response(prompt, pdf_file=None, history=None, clear_pdf=F
                 if rag_instance.current_pdf_hash is None or rag_instance.current_pdf_hash != new_hash:
                 # 4a) Önce varsa eski veriyi sil
                     rag_instance.clear_current_pdf()
-                    # 4b) Yeni PDF’i yükle ve hash’i güncelle
+                    # 4b) Yeni PDF'i yükle ve hash'i güncelle
                     success = rag_instance.load_pdf(temp_path, category="user_uploaded")
                     if not success:
                         return "⚠️ PDF işlenemedi."
@@ -644,10 +627,10 @@ def generate_financial_response(prompt, pdf_file=None, history=None, clear_pdf=F
                 if not texts:
                     return "⚠️ PDF dosyasından metin çıkarılamadı."
                 
-                # İlk 1000 karakteri kontrol et
-                rel_pdf = relevance_agent.generate_response(texts[0][:1000]).strip()
+                # İlk 3000 karakteri kontrol et
+                rel_pdf = relevance_agent.generate_response(texts[0][:3000]).strip()
                 if rel_pdf != "relevant":
-                    return "Ben finansal konularda özelleşmiş bir botum. Gönderdiğiniz dosya alakasız görünüyor."
+                    return rel_pdf
 
                 # Daha az sonuç kullan
                 context = "\n".join(rag_instance.query(prompt, n_results=10, only_text=True))
@@ -678,9 +661,12 @@ def generate_financial_response(prompt, pdf_file=None, history=None, clear_pdf=F
             if rel != "relevant":
                 return rel
             keywords = agent_keyword_generator.generate_response(prompt)
+            
             results = search_google(keywords)
+            
             parsed = parse_search_results(results)
-            top_results = parsed[:15]
+            
+            top_results = parsed[:30]
             summary_input = {
                 "query": prompt,
                 "results": [

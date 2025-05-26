@@ -5,7 +5,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from fredapi import Fred
 import re
 from datetime import datetime, timedelta
-# ✅ API Anahtarlarını tanımla
+# ✅ Define API Keys
 from serpapi import GoogleSearch
 from fredapi import Fred
 from torch.nn.functional import softmax
@@ -14,11 +14,19 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from google.generativeai.types import Tool, FunctionDeclaration
 import dataretrieval as dataretrieval
 import database as db
-finnhub_key = "cvt4umhr01qhup0u9rt0cvt4umhr01qhup0u9rtg"
-exchangerate_key = "fcbb73f4ee7075b498fe3c70"
-fred_key = "ff29cd5a2eab96dcec62d487ce70a219"
-gemini_api_key = "AIzaSyBt0JdZIjSp7lWNrfgV1ChLzI7j_dMxEMo"
+from dotenv import load_dotenv
 import os
+
+# .env dosyasını oku (aynı dizinde ise parametre vermenize gerek yok)
+load_dotenv()
+
+# Anahtarları çek
+finnhub_key        = os.getenv("finnhub_key")
+exchangerate_key   = os.getenv("exchangerate_key")
+fred_key           = os.getenv("fred_key")
+gemini_api_key     = os.getenv("gemini_api_key")
+ser_api_key        = os.getenv("ser_api_key")
+
 fred = Fred(api_key=fred_key)
 genai.configure(api_key=gemini_api_key)
 class Agent:
@@ -41,7 +49,8 @@ class Agent:
       except Exception as e:
           print("❌ Gemini error:", e)
           return f"(Could not generate summary: {e})"
-
+      
+      
 FORBIDDEN_KEYWORDS = [
     "jailbreak", "prompt injection", "ignore previous instructions", "disregard above",
     "bypass filter", "override safety", "simulate dangerous behavior", "unfiltered response",
@@ -237,8 +246,8 @@ Do not explain, speculate, or return anything else.
 """,
     config={
         "temperature": 0.0,    # Rastgelelik yok, aynı girdiye her zaman aynı çıktı
-        "top_p": 1.0,          # Tüm olası token’lar göz önünde, ama temperature=0 nedeniyle yalnızca en olası seçilir
-        "top_k": 1,            # Sadece en yüksek olasılıklı token’ı kullan
+        "top_p": 1.0,          # Tüm olası token'lar göz önünde, ama temperature=0 nedeniyle yalnızca en olası seçilir
+        "top_k": 1,            # Sadece en yüksek olasılıklı token'ı kullan
         "max_output_tokens": 64,
         "response_mime_type": "application/json",# Küçük JSON çıktılar için yeterli uzunluk
     }
@@ -577,10 +586,8 @@ Language Handling:
 5. *Each source URL must be on its own line*, in plain format like https://....
 6. Do NOT use asterisks (*), dashes (-), bullets (•), or parentheses in front of or around the URLs.
 7. You may use dashes or numbers in the main content when listing facts, but *never in the Sources section*.
-8. Always mention the publication date of each news item.
-9. Prioritize results from the last 7 days.
-10. If no recent data is found, note that explicitly.
-11. Structure answers in clear bullet points, each starting with the date.
+
+
 
 📌 Limit:
 Use at most **3** search results in your answer. Do not use all results. Prioritize those with the most informative content and trustworthy sources.
@@ -623,7 +630,7 @@ def search_google(query):
             "q": query,
             "location": "Turkey",
             "num": 10,     
-            "api_key": "6ec1f9d8240d2b9ce0a8fbd90858cf7ddcfc412ee0f87f3379d94c90423fc0dc"
+            "api_key": ser_api_key 
             })
         result = search.get_dict()
         return result

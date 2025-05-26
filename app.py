@@ -112,8 +112,7 @@ def education_chatbot(message, pdf_file, history):
     """Financial education chatbot using the financial_assistant module"""
     try:
         # PDF dosyası yüklenmişse, debug bilgisi görüntüle
-        if pdf_file is not None:
-            print(f"PDF dosya tipi: {type(pdf_file)}")
+        
         
         # Chat history'yi generate_financial_response fonksiyonuna geçir
         response = generate_financial_response(message, pdf_file, history)
@@ -173,13 +172,12 @@ def advisor_chatbot(message, history):
                 
                 # Excel dosyasını oluştur
                 excel_path = generate_risk_excel(response["risk_factors_table"])
-                formatted_response += "\n\n📥 Excel raporu hazır. Yukarıdaki 'Download Excel Report' butonundan indirebilirsiniz."
                 
                 # gr.File bileşenini görünür yapmak için None olmayan bir değer döndür
                 return history + [[message, formatted_response]], gr.update(value=excel_path, visible=True)
 
             elif response.get("status") == "success" and "result" in response:
-                formatted_response = f"🔧 **Function Call Result**\n\n```\n{response['result']}\n```"
+                formatted_response = f"```\n{response['result']}\n```"
             elif "<div" in response or "<a" in response:
                 formatted_response = response.replace('<div style=\'font-family: sans-serif; line-height: 1.6\'>', '')
                 formatted_response = formatted_response.replace('</div>', '')
@@ -652,7 +650,7 @@ with gr.Blocks(title="FINSENTIO", css=custom_css, theme=gr.themes.Monochrome()) 
                         fn=advisor_chatbot,
                         inputs=[adviser_msg, adviser_chat],
                         outputs=[adviser_chat, excel_link],
-                        api_name="adviser_chat"
+                        # api_name="adviser_chat"
                     )
                     adviser_clear.click(lambda: [[], None], None, [adviser_chat, excel_link])
             

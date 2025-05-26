@@ -12,10 +12,17 @@ import torch
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from google.generativeai.types import Tool, FunctionDeclaration
 
-finnhub_key = "cvt4umhr01qhup0u9rt0cvt4umhr01qhup0u9rtg"
-exchangerate_key = "fcbb73f4ee7075b498fe3c70"
-fred_key = "ff29cd5a2eab96dcec62d487ce70a219"
-gemini_api_key = "AIzaSyBt0JdZIjSp7lWNrfgV1ChLzI7j_dMxEMo"
+from dotenv import load_dotenv
+import os
+
+# .env dosyasını oku (aynı dizinde ise parametre vermenize gerek yok)
+load_dotenv(override=True)
+
+# Anahtarları çek
+finnhub_key        = os.getenv("finnhub_key")
+exchangerate_key   = os.getenv("exchangerate_key")
+fred_key           = os.getenv("fred_key")
+gemini_api_key     = os.getenv("gemini_api_key")
 
 fred = Fred(api_key=fred_key)
 genai.configure(api_key=gemini_api_key)
