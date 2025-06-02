@@ -81,11 +81,3 @@ python app.py
 ## Veritabanı
 
 Proje SQLite veritabanı kullanmaktadır. Veritabanı dosyası `users.db` olarak kaydedilir.
-
-## Lisans
-
-Bu proje [lisans türü] altında lisanslanmıştır.
-
-## İletişim
-
-[İletişim bilgileri] 
