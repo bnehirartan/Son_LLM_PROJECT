@@ -2,12 +2,15 @@ import gradio as gr
 import database as db
 from financial_assistant import generate_financial_response 
 from riskanalyzer import get_response
+from llm_cost_calculator import LLMCostCalculator
 import json
 import pandas as pd
 import uuid
 
 # Global user session state
 current_user = None
+cost_calculator = LLMCostCalculator()
+
 def generate_risk_excel(risk_factors):
     # risk_factors: list of dicts
     df = pd.DataFrame(risk_factors)
@@ -107,15 +110,14 @@ def load_profile():
         gr.update(value=profile_data.get('investment_goal', 'Long-term savings'))
     )
 
-# Financial Education chatbot fonksiyonu - generate_financial_response'u kullanarak
 def education_chatbot(message, pdf_file, history):
     """Financial education chatbot using the financial_assistant module"""
     try:
-        # PDF dosyası yüklenmişse, debug bilgisi görüntüle
-        
-        
         # Chat history'yi generate_financial_response fonksiyonuna geçir
         response = generate_financial_response(message, pdf_file, history)
+        
+        # LLM maliyetini hesapla - Gemini 2.0 Flash kullan
+        cost_info = cost_calculator.calculate_cost(message, response, "gemini-2.0-flash")
         
         # HTML içeriğini Gradio chatbot için düzenle
         processed_response = response
@@ -134,12 +136,45 @@ def education_chatbot(message, pdf_file, history):
             for link_url, link_text in links:
                 processed_response = processed_response.replace(f'<a href="{link_url}" target="_blank">{link_text}</a>', link_url)
         
-        return history + [[message, processed_response]]
+        # Agent yönlendirme bilgilerini al
+        from financial_assistant import danger_agent, intent_classifier, relevance_agent
+        
+        # Danger check
+        danger_result = danger_agent.generate_response(message)
+        danger_status = "🟢" if danger_result == "safe" else "🔴"
+        
+        # Intent check
+        intent_result = intent_classifier.generate_response(message)
+        
+        # Relevance check
+        relevance_result = relevance_agent.generate_response(message)
+        
+        # Agent yönlendirme bilgilerini oluştur
+        agent_routing = f"""
+### Agent Yönlendirme Bilgisi
+{danger_status} Prompt is {danger_result.upper()} (DangerAgent)
+🔀 Detected intent: {intent_result} (IntentClassifier)
+🌐 Routed to {intent_result.upper()}Agent
+"""
+        
+        # Maliyet bilgisini oluştur
+        cost_message = f"""
+{agent_routing}
+### Maliyet Bilgisi (Gemini 2.0 Flash)
+- *Prompt Token Sayısı:* {cost_info['prompt_tokens']}
+- *Response Token Sayısı:* {cost_info['response_tokens']}
+- *Toplam Token:* {cost_info['prompt_tokens'] + cost_info['response_tokens']}
+- *Prompt Maliyeti:* ${cost_info['prompt_cost']:.6f}
+- *Response Maliyeti:* ${cost_info['response_cost']:.6f}
+- *Toplam Maliyet:* ${cost_info['total_cost']:.6f}
+"""
+        
+        return history + [[message, processed_response]], cost_message
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
         print(f"Education chatbot hata: {e}\n{error_details}")
-        return history + [[message, f"Bir hata oluştu: {str(e)}"]]
+        return history + [[message, f"Bir hata oluştu: {str(e)}"]], "Maliyet hesaplanamadı"
 
 def advisor_chatbot(message, history):
     """Risk & Analyzer chatbot using the riskanalyzer module"""
@@ -159,7 +194,7 @@ def advisor_chatbot(message, history):
 
                 raw_summary = response.get("summary", "No summary provided.")
                 import re, json
-                cleaned = re.sub(r'```json|```', '', raw_summary, flags=re.IGNORECASE).strip()
+                cleaned = re.sub(r'json|', '', raw_summary, flags=re.IGNORECASE).strip()
                 cleaned = re.sub(r'^\s*json', '', cleaned, flags=re.IGNORECASE).strip()
 
                 try:
@@ -173,11 +208,43 @@ def advisor_chatbot(message, history):
                 # Excel dosyasını oluştur
                 excel_path = generate_risk_excel(response["risk_factors_table"])
                 
-                # gr.File bileşenini görünür yapmak için None olmayan bir değer döndür
-                return history + [[message, formatted_response]], gr.update(value=excel_path, visible=True)
+                # LLM maliyetini hesapla - Gemini 1.5 Flash Latest kullan
+                cost_info = cost_calculator.calculate_cost(message, formatted_response, "gemini-1.5-flash-latest")
+                
+                # Agent yönlendirme bilgilerini al
+                from riskanalyzer import danger_agent, analyze_prompt
+                
+                # Danger check
+                danger_result = danger_agent.generate_response(message)
+                danger_status = "🟢" if danger_result == "safe" else "🔴"
+                
+                # Intent analysis
+                intent_result = analyze_prompt(message)
+                intent_type = intent_result.get("intent", "unknown")
+                
+                # Agent yönlendirme bilgilerini oluştur
+                agent_routing = f"""
+### Agent Yönlendirme Bilgisi
+{danger_status} Prompt is {danger_result.upper()} (DangerAgent)
+🔀 Detected intent: {intent_type} (IntentAnalyzer)
+🌐 Routed to RiskAnalyzerAgent
+"""
+                
+                cost_message = f"""
+{agent_routing}
+### Maliyet Bilgisi (Gemini 1.5 Flash Latest)
+- *Prompt Token Sayısı:* {cost_info['prompt_tokens']}
+- *Response Token Sayısı:* {cost_info['response_tokens']}
+- *Toplam Token:* {cost_info['prompt_tokens'] + cost_info['response_tokens']}
+- *Prompt Maliyeti:* ${cost_info['prompt_cost']:.6f}
+- *Response Maliyeti:* ${cost_info['response_cost']:.6f}
+- *Toplam Maliyet:* ${cost_info['total_cost']:.6f}
+"""
+                
+                return history + [[message, formatted_response]], gr.update(value=excel_path, visible=True), cost_message
 
             elif response.get("status") == "success" and "result" in response:
-                formatted_response = f"```\n{response['result']}\n```"
+                formatted_response = f"\n{response['result']}\n"
             elif "<div" in response or "<a" in response:
                 formatted_response = response.replace('<div style=\'font-family: sans-serif; line-height: 1.6\'>', '')
                 formatted_response = formatted_response.replace('</div>', '')
@@ -190,13 +257,46 @@ def advisor_chatbot(message, history):
                     formatted_response = formatted_response.replace(f'<a href="{link_url}" target="_blank">{link_text}</a>', link_url)
         else:
             formatted_response = str(response)
+        
+        # LLM maliyetini hesapla - Gemini 1.5 Flash Latest kullan
+        cost_info = cost_calculator.calculate_cost(message, formatted_response, "gemini-1.5-flash-latest")
+        
+        # Agent yönlendirme bilgilerini al
+        from riskanalyzer import danger_agent, analyze_prompt
+        
+        # Danger check
+        danger_result = danger_agent.generate_response(message)
+        danger_status = "🟢" if danger_result == "safe" else "🔴"
+        
+        # Intent analysis
+        intent_result = analyze_prompt(message)
+        intent_type = intent_result.get("intent", "unknown")
+        
+        # Agent yönlendirme bilgilerini oluştur
+        agent_routing = f"""
+### Agent Yönlendirme Bilgisi
+{danger_status} Prompt is {danger_result.upper()} (DangerAgent)
+🔀 Detected intent: {intent_type} (IntentAnalyzer)
+🌐 Routed to RiskAnalyzerAgent
+"""
+        
+        cost_message = f"""
+{agent_routing}
+### Maliyet Bilgisi (Gemini 1.5 Flash Latest)
+- *Prompt Token Sayısı:* {cost_info['prompt_tokens']}
+- *Response Token Sayısı:* {cost_info['response_tokens']}
+- *Toplam Token:* {cost_info['prompt_tokens'] + cost_info['response_tokens']}
+- *Prompt Maliyeti:* ${cost_info['prompt_cost']:.6f}
+- *Response Maliyeti:* ${cost_info['response_cost']:.6f}
+- *Toplam Maliyet:* ${cost_info['total_cost']:.6f}
+"""
             
-        return history + [[message, formatted_response]], gr.update(value=None, visible=False)
+        return history + [[message, formatted_response]], gr.update(value=None, visible=False), cost_message
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
         print(f"Risk analyzer chatbot error: {e}\n{error_details}")
-        return history + [[message, f"An error occurred: {str(e)}"]], gr.update(value=None, visible=False)
+        return history + [[message, f"An error occurred: {str(e)}"]], gr.update(value=None, visible=False), "Maliyet hesaplanamadı"
 
 # Create custom CSS for larger text with black and white theme
 custom_css = """
@@ -210,6 +310,122 @@ custom_css = """
     --accent-color: #555555;
     --border-radius: 8px;
     --box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* Login ve Register sayfası için özel stiller */
+.auth-container {
+    max-width: 400px !important;
+    margin: 0 auto !important;
+    padding: 2rem !important;
+    background: white !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+}
+
+.auth-container.dark {
+    background: #1a1a1a !important;
+}
+
+.auth-title {
+    text-align: center !important;
+    font-size: 2rem !important;
+    font-weight: bold !important;
+    margin-bottom: 2rem !important;
+    color: var(--primary-color) !important;
+}
+
+.auth-title.dark {
+    color: var(--light-text) !important;
+}
+
+.auth-input {
+    width: 100% !important;
+    padding: 12px !important;
+    margin-bottom: 1rem !important;
+    border: 2px solid var(--light-gray) !important;
+    border-radius: var(--border-radius) !important;
+    font-size: 1rem !important;
+    transition: all 0.3s ease !important;
+}
+
+.auth-input:focus {
+    border-color: var(--primary-color) !important;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1) !important;
+}
+
+.auth-input.dark {
+    background: #2a2a2a !important;
+    border-color: #444 !important;
+    color: white !important;
+}
+
+.auth-button {
+    width: 100% !important;
+    padding: 12px !important;
+    background: var(--primary-color) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--border-radius) !important;
+    font-size: 1rem !important;
+    font-weight: bold !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
+    margin-top: 1rem !important;
+}
+
+.auth-button:hover {
+    background: var(--secondary-color) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+.auth-message {
+    text-align: center !important;
+    margin-top: 1rem !important;
+    padding: 1rem !important;
+    border-radius: var(--border-radius) !important;
+    font-size: 0.9rem !important;
+}
+
+.auth-message.success {
+    background: #e6ffe6 !important;
+    color: #006600 !important;
+    border: 1px solid #99ff99 !important;
+}
+
+.auth-message.error {
+    background: #ffe6e6 !important;
+    color: #cc0000 !important;
+    border: 1px solid #ff9999 !important;
+}
+
+.auth-tabs {
+    margin-bottom: 2rem !important;
+}
+
+.auth-tabs button {
+    padding: 1rem 2rem !important;
+    font-size: 1.1rem !important;
+    font-weight: bold !important;
+    border: none !important;
+    background: none !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
+    color: #fff !important;
+}
+
+.auth-tabs button.selected {
+    color: #fff !important;
+    border-bottom: 3px solid #fff !important;
+}
+
+.auth-tabs.dark button {
+    color: #fff !important;
+}
+
+.auth-tabs.dark button.selected {
+    color: #fff !important;
+    border-bottom-color: #fff !important;
 }
 
 .larger-text label {
@@ -295,21 +511,24 @@ custom_css = """
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
 }
 
+/* Kullanıcı balonu */
 .large-chatbox .user-message {
-    background-color: var(--secondary-color) !important;
-    color: var(--light-text) !important;
-    font-size: 18px !important;
-    font-weight: 500 !important;
-    margin-left: 20px !important;
-    margin-right: 8px !important;
+    background-color: #333333 !important;  /* koyu gri */
+    color: #ffffff !important;             /* beyaz yazı */
+    border-radius: 20px 20px 0 20px !important;
+    max-width: 70% !important;
+    align-self: flex-end !important;
+    margin-left: 30% !important;
 }
 
+/* Bot balonu */
 .large-chatbox .bot-message {
-    background-color: var(--light-gray) !important;
-    color: var(--text-color) !important;
-    font-size: 18px !important;
-    margin-right: 20px !important;
-    margin-left: 8px !important;
+    background-color: #f0f0f0 !important;  /* açık gri */
+    color: #000000 !important;             /* siyah yazı */
+    border-radius: 20px 20px 20px 0 !important;
+    max-width: 70% !important;
+    align-self: flex-start !important;
+    margin-right: 30% !important;
 }
 
 /* Chatbox dark mode */
@@ -386,6 +605,88 @@ custom_css = """
     transform: translateY(-2px) !important;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
 }
+
+.cost-panel {
+    background-color: #f5f5f5 !important;
+    padding: 20px !important;
+    border-radius: 10px !important;
+    border: 1px solid #ddd !important;
+    margin: 10px !important;
+    height: 100% !important;
+    overflow-y: auto !important;
+}
+
+.cost-panel h3 {
+    color: #333 !important;
+    margin-bottom: 15px !important;
+    font-size: 1.2em !important;
+}
+
+.cost-panel ul {
+    list-style-type: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.cost-panel li {
+    margin: 10px 0 !important;
+    padding: 5px 0 !important;
+    border-bottom: 1px solid #eee !important;
+}
+
+.dark .cost-panel {
+    background-color: #2a2a2a !important;
+    border-color: #444 !important;
+}
+
+.dark .cost-panel h3 {
+    color: #fff !important;
+}
+
+.dark .cost-panel li {
+    border-bottom-color: #444 !important;
+}
+
+.terms-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    font-size: 1rem;
+}
+.terms-inline input[type='checkbox'] {
+    width: 18px;
+    height: 18px;
+    margin: 0 4px 0 0;
+}
+.terms-inline .accept-label {
+    font-size: 1rem;
+    font-weight: 400;
+    color: #fff;
+    margin: 0 2px 0 0;
+}
+.terms-inline .terms-link {
+    font-size: 1rem;
+    color: #4A90E2;
+    text-decoration: underline;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0 0 0 2px;
+    font-weight: 400;
+    transition: color 0.2s;
+}
+.terms-inline .terms-link:hover {
+    color: #357ab8;
+}
+.gradio-container .component-value {
+    display: none !important;
+}
+.component-value {
+    display: none !important;
+}
+
 """
 
 # Create the main application
@@ -571,88 +872,117 @@ with gr.Blocks(title="FINSENTIO", css=custom_css, theme=gr.themes.Monochrome()) 
                     gr.Markdown("## Financial Education Chatbot")
                     gr.Markdown("Ask any questions about financial terms, concepts, or strategies to improve your knowledge!")
                     
-                    # Education chatbot interface - daha büyük chat alanı
-                    education_chat = gr.Chatbot(
-                        label="Chat History",
-                        height=700,  # Daha da yüksek chat alanı
-                        value=[],
-                        elem_classes=["large-chatbox"],  # Özel CSS sınıfı eklendi
-                        show_label=True,  # Etiketi göster
-                        container=True  # Container kullan
-                    )
-                    
-                    # Kontrol paneli - alt kısım
-                    with gr.Row(equal_height=True):
-                        # Sol taraf - Soru girme alanı
-                        with gr.Column(scale=4):
-                            education_msg = gr.Textbox(
-                                label="Your Question",
-                                placeholder="Ask me anything about finance...",
-                                container=True,
-                                lines=2,
-                                max_lines=4,
-                                elem_classes=["prominent-input"]
+                    with gr.Row():
+                        # Sol taraf - Chat arayüzü
+                        with gr.Column(scale=3):
+                            # Education chatbot interface
+                            education_chat = gr.Chatbot(
+                                label="Chat History",
+                                height=700,
+                                value=[],
+                                elem_classes=["large-chatbox"],
+                                show_label=True,
+                                container=True
                             )
                             
-                            # Butonlar alt satırda
-                            with gr.Row():
-                                education_submit = gr.Button("Ask", variant="primary", size="lg", elem_classes=["action-button"])
-                                education_clear = gr.Button("Clear Chat", size="lg")
+                            # Kontrol paneli
+                            with gr.Row(equal_height=True):
+                                # Sol taraf - Soru girme alanı
+                                with gr.Column(scale=4):
+                                    education_msg = gr.Textbox(
+                                        label="Your Question",
+                                        placeholder="Ask me anything about finance...",
+                                        container=True,
+                                        lines=2,
+                                        max_lines=4,
+                                        elem_classes=["prominent-input"]
+                                    )
+                                    
+                                    # Butonlar alt satırda
+                                    with gr.Row():
+                                        education_submit = gr.Button("Ask", variant="primary", size="lg", elem_classes=["action-button"])
+                                        education_clear = gr.Button("Clear Chat", size="lg")
+                                
+                                # Sağ taraf - PDF yükleme
+                                with gr.Column(scale=1, min_width=200):
+                                    pdf_upload = gr.File(
+                                        label="Upload PDF",
+                                        file_types=[".pdf"],
+                                        type="binary",
+                                        elem_classes=["pdf-upload-area"]
+                                    )
                         
-                        # Sağ taraf - PDF yükleme
-                        with gr.Column(scale=1, min_width=200):
-                            pdf_upload = gr.File(
-                                label="Upload PDF",
-                                file_types=[".pdf"],
-                                type="binary",
-                                elem_classes=["pdf-upload-area"]
+                        # Sağ taraf - Maliyet bilgisi paneli
+                        with gr.Column(scale=1):
+                            cost_panel = gr.Markdown(
+                                label="Maliyet Bilgisi",
+                                value="### Maliyet Bilgisi\nHenüz bir soru sorulmadı.",
+                                elem_classes=["cost-panel"]
                             )
                     
                     # Connect chatbot components
                     education_submit.click(
                         fn=education_chatbot,
                         inputs=[education_msg, pdf_upload, education_chat],
-                        outputs=[education_chat],
+                        outputs=[education_chat, cost_panel],
                         api_name="education_chat"
                     )
-                    education_clear.click(lambda: [], None, education_chat)
+                    education_clear.click(
+                        lambda: [[], "### Maliyet Bilgisi\nHenüz bir soru sorulmadı."],
+                        None,
+                        [education_chat, cost_panel]
+                    )
                 
                 with gr.TabItem("Financial Adviser & Analyzer Chatbot"):
                     gr.Markdown("## Financial Adviser & Analyzer Chatbot")
                     gr.Markdown("Get personalized financial advice and analysis based on your profile and market conditions.")
                     
-                    # Adviser chatbot interface
-                    adviser_chat = gr.Chatbot(
-                        label="Chat History",
-                        height=700,
-                        value=[],
-                        allow_html=True
-                    )
-                    adviser_msg = gr.Textbox(
-                        label="Your Question",
-                        placeholder="Ask for financial advice or market analysis...",
-                        scale=7
-                    )
                     with gr.Row():
-                        adviser_submit = gr.Button("Ask", scale=1, variant="primary")
-                        adviser_clear = gr.Button("Clear Chat", scale=1)
-                    
-                    # Excel download link - interactive=True ekledik ve type="file" belirttik
-                    excel_link = gr.File(
-                        label="Download Excel Report",
-                        visible=False,
-                        interactive=True,
-                        type="file"
-                    )
+                        # Sol taraf - Chat arayüzü
+                        with gr.Column(scale=3):
+                            # Adviser chatbot interface
+                            adviser_chat = gr.Chatbot(
+                                label="Chat History",
+                                height=700,
+                                value=[],
+                                allow_html=True
+                            )
+                            adviser_msg = gr.Textbox(
+                                label="Your Question",
+                                placeholder="Ask for financial advice or market analysis...",
+                                scale=7
+                            )
+                            with gr.Row():
+                                adviser_submit = gr.Button("Ask", scale=1, variant="primary")
+                                adviser_clear = gr.Button("Clear Chat", scale=1)
+                            
+                            # Excel download link
+                            excel_link = gr.File(
+                                label="Download Excel Report",
+                                visible=False,
+                                interactive=True,
+                                type="file"
+                            )
+                        
+                        # Sağ taraf - Maliyet bilgisi paneli
+                        with gr.Column(scale=1):
+                            adviser_cost_panel = gr.Markdown(
+                                label="Maliyet Bilgisi",
+                                value="### Maliyet Bilgisi\nHenüz bir soru sorulmadı.",
+                                elem_classes=["cost-panel"]
+                            )
                     
                     # Connect chatbot components
                     outputs = adviser_submit.click(
                         fn=advisor_chatbot,
                         inputs=[adviser_msg, adviser_chat],
-                        outputs=[adviser_chat, excel_link],
-                        # api_name="adviser_chat"
+                        outputs=[adviser_chat, excel_link, adviser_cost_panel]
                     )
-                    adviser_clear.click(lambda: [[], None], None, [adviser_chat, excel_link])
+                    adviser_clear.click(
+                        lambda: [[], None, "### Maliyet Bilgisi\nHenüz bir soru sorulmadı."],
+                        None,
+                        [adviser_chat, excel_link, adviser_cost_panel]
+                    )
             
             # Logout button
             with gr.Row():
@@ -660,22 +990,106 @@ with gr.Blocks(title="FINSENTIO", css=custom_css, theme=gr.themes.Monochrome()) 
         
         # Create auth interface
         with gr.Group(visible=True) as auth_interface:
-            with gr.Tabs():
-                with gr.TabItem("Login"):
-                    username_login = gr.Textbox(label="Username", scale=2)
-                    password_login = gr.Textbox(label="Password", type="password", scale=2)
-                    with gr.Row():
-                        login_button = gr.Button("Login", size="lg", variant="primary")
-                    login_message = gr.Markdown("")
-                
-                with gr.TabItem("Register"):
-                    username_register = gr.Textbox(label="Username", scale=2)
-                    email_register = gr.Textbox(label="Email", scale=2)
-                    password_register = gr.Textbox(label="Password", type="password", scale=2)
-                    confirm_password = gr.Textbox(label="Confirm Password", type="password", scale=2)
-                    with gr.Row():
-                        register_button = gr.Button("Register", size="lg", variant="primary")
-                    register_message = gr.Markdown("")
+            with gr.Box(elem_classes=["auth-container"]):
+                with gr.Tabs(elem_classes=["auth-tabs"]) as auth_tabs:
+                    with gr.TabItem("Login", elem_classes=["auth-tab"]):
+                        gr.Markdown("## Login to Your Account", elem_classes=["auth-title"])
+                        username_login = gr.Textbox(
+                            label="Username",
+                            placeholder="Enter your username",
+                            elem_classes=["auth-input"]
+                        )
+                        password_login = gr.Textbox(
+                            label="Password",
+                            type="password",
+                            placeholder="Enter your password",
+                            elem_classes=["auth-input"]
+                        )
+                        # Accept terms and conditions: Centered, single HTML block above login button
+                        gr.HTML(
+                            '''
+                            <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 12px; margin-top: 24px;">
+                                <input type="checkbox" id="accept-terms-html" style="width:18px;height:18px;margin-right:8px;">
+                                <span style="font-size:1rem;color:#fff;">Accept </span>
+                                <a href="javascript:void(0);" id="terms-link-html" style="color:#4A90E2;text-decoration:underline;cursor:pointer;font-size:1rem;margin-left:4px;">Terms and Conditions</a>
+                            </div>
+                            <script>
+                            document.addEventListener('DOMContentLoaded', function() {
+                                var link = document.getElementById('terms-link-html');
+                                if(link) link.onclick = function() {
+                                    document.querySelector('[id^=\'terms-btn\']').click();
+                                };
+                            });
+                            </script>
+                            '''
+                        )
+                        # Modal benzeri popup için Markdown ve kapat butonu
+                        terms_popup = gr.Markdown(
+                            value="""# Terms and Conditions\n\nHere you can put your terms and conditions text.\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla accumsan, metus ultrices eleifend gravida...\n\n- You must accept these terms to use the service.\n- Your data is handled securely.\n- ...\n\n""",
+                            visible=False,
+                            elem_id="terms-popup-md",
+                            elem_classes=["cost-panel"]
+                        )
+                        terms_btn = gr.Button(
+                            value="Terms and Conditions",
+                            elem_id="terms-btn",
+                            size="sm",
+                            variant="secondary",
+                            visible=False  # Only for JS trigger
+                        )
+                        close_terms_btn = gr.Button(
+                            value="Close",
+                            visible=False,
+                            elem_id="close-terms-btn",
+                            size="sm"
+                        )
+                        # Checkbox işaretlenince login_button aktif olsun (Blocks context içinde olmalı)
+                        with gr.Row():
+                            login_button = gr.Button(
+                                "Login",
+                                size="lg",
+                                variant="primary",
+                                elem_classes=["auth-button"],
+                                interactive=True  # Başlangıçta pasif
+                            )
+                        login_message = gr.Markdown(
+                            elem_classes=["auth-message"]
+                        )
+                    
+                    with gr.TabItem("Register", elem_classes=["auth-tab"]):
+                        gr.Markdown("## Create New Account", elem_classes=["auth-title"])
+                        username_register = gr.Textbox(
+                            label="Username",
+                            placeholder="Choose a username",
+                            elem_classes=["auth-input"]
+                        )
+                        email_register = gr.Textbox(
+                            label="Email",
+                            placeholder="Enter your email",
+                            elem_classes=["auth-input"]
+                        )
+                        password_register = gr.Textbox(
+                            label="Password",
+                            type="password",
+                            placeholder="Choose a password",
+                            elem_classes=["auth-input"]
+                        )
+                        confirm_password = gr.Textbox(
+                            label="Confirm Password",
+                            type="password",
+                            placeholder="Confirm your password",
+                            elem_classes=["auth-input"]
+                        )
+                        with gr.Row():
+                            register_button = gr.Button(
+                                "Register",
+                                size="lg",
+                                variant="primary",
+                                elem_classes=["auth-button"]
+                            )
+                        register_message = gr.Markdown(
+                            elem_classes=["auth-message"]
+                        )
         
         # Connect the buttons to functions
         login_button.click(
